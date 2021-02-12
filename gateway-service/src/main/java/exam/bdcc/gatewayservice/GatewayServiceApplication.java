@@ -1,5 +1,6 @@
 package exam.bdcc.gatewayservice;
 
+
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.ReactiveDiscoveryClient;
@@ -16,16 +17,9 @@ public class GatewayServiceApplication {
         SpringApplication.run(GatewayServiceApplication.class, args);
     }
 
-
-
     @Bean
-    DiscoveryClientRouteDefinitionLocator definitionLocator(
-            ReactiveDiscoveryClient rdc ,
-            DiscoveryLocatorProperties properties){
-
-        return new DiscoveryClientRouteDefinitionLocator(rdc,properties);
+    DiscoveryClientRouteDefinitionLocator dynamicRoutes(ReactiveDiscoveryClient rdc, DiscoveryLocatorProperties dlp){
+        return new DiscoveryClientRouteDefinitionLocator(rdc,dlp);
     }
-
-
 
 }
