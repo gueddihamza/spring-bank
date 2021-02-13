@@ -1,16 +1,20 @@
 package exam.bdcc.accountservice.service;
 
+
 import exam.bdcc.accountservice.entities.Compte;
 import exam.bdcc.accountservice.entities.Operation;
 import exam.bdcc.accountservice.feign.ClientRest;
-import exam.bdcc.accountservice.model.CompteEtat;
-import exam.bdcc.accountservice.model.CompteOperation;
-import exam.bdcc.accountservice.model.OperationType;
+import exam.bdcc.accountservice.model.*;
 import exam.bdcc.accountservice.repositories.CompteRepository;
 import exam.bdcc.accountservice.repositories.OperationRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class OperationsServiceImpl implements OperationsService {
@@ -41,6 +45,8 @@ public class OperationsServiceImpl implements OperationsService {
         operationRepository.save(operation);
         Compte compte = compteRepository.getOne(versementOperation.getCompteId());
         operation.setCompte(compte);
+        System.out.println(compte.getSolde());
+        System.out.println("operation Montation-->" + operation.getMontant());
         compte.setSolde(versementOperation.getMontant() + compte.getSolde());
         if (versementOperation.getDate() != null)
             operation.setDate(versementOperation.getDate());
@@ -65,12 +71,30 @@ public class OperationsServiceImpl implements OperationsService {
         return operation;
     }
 
+
+
     @Override
-    public Compte getCompteByClient(Long clientId) {
-        Compte compte = compteRepository.getCompteByIdClient(clientId);
-        compte.setClient(clientRestClient.getClientById(clientId));
-        return compte;
+    public List<Operation> virement(CompteVirement virement) {
+        Compte compteSource = compteRepository.getOne(virement.getCompteIdSource());
+        Compte compteDest = compteRepository.getOne(virement.getCompteIdDest());
+        if (virement.getDate() == null) {
+            virement.setDate(LocalDateTime.now());
+        }
+        Operation sourceOperation = new Operation(null, virement.getDate(), virement.getMontant(), OperationType.VIREMENT_CREDIT, compteSource);
+        Operation destOperation = new Operation(null, virement.getDate(), virement.getMontant(), OperationType.VIREMENT_DEBIT, compteDest);
+        compteSource.setSolde(compteSource.getSolde() - virement.getMontant());
+        compteDest.setSolde(compteDest.getSolde() + virement.getMontant());
+        List<Operation> operationList = new ArrayList<>();
+        operationList.add(sourceOperation);
+        operationList.add(destOperation);
+        List<Compte> compteList = new ArrayList<>();
+        compteList.add(compteDest);
+        compteList.add(compteSource);
+        compteRepository.saveAll(compteList);
+        operationRepository.saveAll(operationList);
+        return operationList;
     }
+
 
     @Override
     public void activerCompte(Long compteId) {
@@ -85,4 +109,23 @@ public class OperationsServiceImpl implements OperationsService {
         compte.setEtat(CompteEtat.SUSPENDED);
         compteRepository.save(compte);
     }
+    @Override
+    public Page<Operation> getOperationsPaginated(Long compteId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        return operationRepository.getOperationsByCompteId(compteId, pageable);
+    }
+
+    @Override
+    public Client getClientComptes(Long clientId) {
+        Client client = clientRestClient.getClientById(clientId);
+        client.setComptes(compteRepository.getCompteByIdClient(clientId));
+
+        return client;
+    }
+
+    @Override
+    public List<Compte> getComptesByClient(Long clientId) {
+        return compteRepository.getCompteByIdClient(clientId);
+    }
+
 }

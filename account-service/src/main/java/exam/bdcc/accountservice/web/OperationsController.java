@@ -1,118 +1,98 @@
 package exam.bdcc.accountservice.web;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
 import exam.bdcc.accountservice.entities.Compte;
 import exam.bdcc.accountservice.entities.Operation;
-import exam.bdcc.accountservice.feign.ClientRest;
-import exam.bdcc.accountservice.model.CompteEtat;
-import exam.bdcc.accountservice.model.OperationType;
-import exam.bdcc.accountservice.repositories.CompteRepository;
-import exam.bdcc.accountservice.repositories.OperationRepository;
+import exam.bdcc.accountservice.model.Client;
+import exam.bdcc.accountservice.model.CompteOperation;
+import exam.bdcc.accountservice.model.CompteVirement;
+import exam.bdcc.accountservice.service.KafkaProducerService;
+import exam.bdcc.accountservice.service.OperationsService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
-import javax.persistence.Column;
+
 import javax.transaction.Transactional;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
+
 
 @RestController
 @CrossOrigin("*")
 public class OperationsController {
-    private CompteRepository compteRepository;
-    private OperationRepository operationRepository;
-    private ClientRest clientRestClient;
+    @Autowired
+    private OperationsService operationsService;
+    @Autowired
+    private KafkaProducerService kafkaProducerService;
 
-
-
-    public OperationsController(CompteRepository compteRepository, OperationRepository operationRepository, ClientRest clientRestClient) {
-        this.compteRepository = compteRepository;
-        this.operationRepository = operationRepository;
-        this.clientRestClient = clientRestClient;
+    @Transactional
+    @PostMapping("/addCompte")
+    public Compte addCompte(@RequestBody NewAccount newAccount) {
+        return operationsService.addCompte(newAccount.getClientId(), newAccount.getTypeCompte());
     }
-
-
-
 
     @Transactional
     @PostMapping("/versement")
-    public Operation versementRetrait(@RequestBody CompteVersement compteVersement) {
-        Operation operation = new Operation();
-        operation.setMontant(compteVersement.getMontant());
-        operation.setType(compteVersement.getType());
-        operationRepository.save(operation);
-        Compte compte = compteRepository.getOne(compteVersement.getCompteId());
-        operation.setCompte(compte);
-        if (compteVersement.getType().equals(OperationType.CREDIT))
-            compteVersement.setMontant(compteVersement.getMontant() * -1);
-        compte.setSolde(compteVersement.getMontant() + compte.getSolde());
-        if (compteVersement.getDate() != null)
-            operation.setDate(compteVersement.getDate());
-        else operation.setDate(LocalDateTime.now());
-        compteRepository.save(compte);
+    public Operation versment(@RequestBody CompteOperation compteOperation) {
+        System.out.println(compteOperation);
+        Operation operation = operationsService.versement(compteOperation);
+        kafkaProducerService.send("operations", operation);
+        return operation;
+
+    }
+
+    @Transactional
+    @PostMapping("/retrait")
+    public Operation retrait(@RequestBody CompteOperation compteOperation) {
+        Operation operation = operationsService.retrait(compteOperation);
+        kafkaProducerService.send("operations", operation);
         return operation;
     }
 
     @Transactional
     @PostMapping("/virement")
-    public void virement(@RequestBody Virement virement) {
-        Compte compteSource = compteRepository.getOne(virement.getCompteIdSource());
-        Compte compteDest = compteRepository.getOne(virement.getCompteIdDest());
-        Operation sourceOperation = new Operation(null, virement.getDate(), virement.getMontant(), OperationType.CREDIT, compteSource);
-        Operation destOperation = new Operation(null, virement.getDate(), virement.getMontant(), OperationType.DEBIT, compteDest);
-        compteSource.setSolde(compteSource.getSolde() - virement.getMontant());
-        compteSource.setSolde(compteSource.getSolde() + virement.getMontant());
-        List<Operation> operationList = new ArrayList<>();
-        operationList.add(sourceOperation);
-        operationList.add(destOperation);
-        List<Compte> compteList = new ArrayList<>();
-        compteList.add(compteDest);
-        compteList.add(compteSource);
-        compteRepository.saveAll(compteList);
-        operationRepository.saveAll(operationList);
+    public List<Operation> virement(@RequestBody CompteVirement virement) {
+        List<Operation> operations = operationsService.virement(virement);
+        operations.forEach(operation -> kafkaProducerService.send("operations", operation));
+        return operations;
     }
+
+
+    @GetMapping("/comptes/{id}/operations/{page}/{size}")
+    public Page<Operation> getOperationsPaginated(@PathVariable(name = "id") Long compteId, @PathVariable int page, @PathVariable int size) {
+        return operationsService.getOperationsPaginated(compteId, page, size);
+    }
+
+    @GetMapping("/clients/{id}/comptes")
+    public List<Compte> getClientComptes(@PathVariable(name = "id") Long clientId) {
+        return operationsService.getComptesByClient(clientId);
+    }
+
+    @GetMapping("/clients/{id}/comptes/full")
+    public Client getCompteByClient(@PathVariable(name = "id") Long clientId) {
+        return operationsService.getClientComptes(clientId);
+    }
+
     @Transactional
-    @PostMapping("/compte/{id}/activate")
-    public void activateCompte(@PathVariable Long id){
-        Compte compte = compteRepository.getOne(id);
-        compte.setEtat(CompteEtat.ACTIVE);
-        compteRepository.save(compte);
+    @PostMapping("/comptes/{id}/activate")
+    public void activateCompte(@PathVariable(name = "id") Long compteId) {
+        operationsService.activerCompte(compteId);
     }
 
     @Transactional
     @PostMapping("/compte/{id}/suspend")
-    public void suspendCompte(@PathVariable Long id){
-        Compte compte = compteRepository.getOne(id);
-        compte.setEtat(CompteEtat.SUSPENDED);
-        compteRepository.save(compte);
+    public void suspendCompte(@PathVariable(name = "id") Long compteId) {
+        operationsService.activerCompte(compteId);
     }
 
-}
-
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-class CompteVersement {
-    private Double montant;
-    private Long compteId;
-    @JsonFormat(pattern = "dd-MM-yyyy HH:mm:ss")
-    @Column(nullable = true)
-    private LocalDateTime date;
-    private String type;
 
 }
 
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
-class Virement {
-    private Double montant;
-    private Long compteIdSource;
-    private Long compteIdDest;
-    @JsonFormat(pattern = "dd-MM-yyyy HH:mm:ss")
-    @Column(nullable = true)
-    private LocalDateTime date;
+@AllArgsConstructor
+class NewAccount {
+    private Long clientId;
+    private String typeCompte;
 }
